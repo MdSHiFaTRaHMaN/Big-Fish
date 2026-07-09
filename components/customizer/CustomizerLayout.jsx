@@ -18,6 +18,7 @@ import {
   ShoppingCart,
 } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   JerseySVG,
@@ -52,6 +53,20 @@ export default function CustomizerLayout() {
   const setSnapX = useCustomizerStore((s) => s.setSnapX);
   const setSnapY = useCustomizerStore((s) => s.setSnapY);
   const setSnapType = useCustomizerStore((s) => s.setSnapType);
+
+  const [queryParams, setQueryParams] = useState({ quinckId: "", shopifyBaseUrl: "" });
+  const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
+  const [checkoutResult, setCheckoutResult] = useState(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      setQueryParams({
+        quinckId: params.get("quinckId") || "",
+        shopifyBaseUrl: params.get("shopifyBaseUrl") || "",
+      });
+    }
+  }, []);
 
   const threeRef = useRef(null);
 
@@ -444,10 +459,10 @@ export default function CustomizerLayout() {
         prev.map((l) =>
           l.id === id
             ? {
-                ...l,
-                x: snapResultX.value,
-                y: snapResultY.value,
-              }
+              ...l,
+              x: snapResultX.value,
+              y: snapResultY.value,
+            }
             : l,
         ),
       );
@@ -530,7 +545,7 @@ export default function CustomizerLayout() {
     const handleMouseMove = (moveEvent) => {
       const curDist = Math.sqrt(
         Math.pow(moveEvent.clientX - centerX, 2) +
-          Math.pow(moveEvent.clientY - centerY, 2),
+        Math.pow(moveEvent.clientY - centerY, 2),
       );
       const newScale = Math.max(
         0.2,
@@ -605,8 +620,192 @@ export default function CustomizerLayout() {
     setSelectedLayerId(newId);
   };
 
+  const handleCheckout = async () => {
+    setIsCheckoutLoading(true);
+    const loadingToastId = toast.loading("Capturing design views...", {
+      description: "Please wait while we prepare your checkout session.",
+    });
+
+    try {
+      // 1. Capture front and back side snapshots
+      const originalView = currentView;
+
+      // Helper to capture a view
+      const captureView = (viewName) => {
+        return new Promise((resolve) => {
+          setCurrentView(viewName);
+          setTimeout(() => {
+            try {
+              if (threeRef.current) {
+                const { gl, scene, camera } = threeRef.current;
+                gl.render(scene, camera);
+                const dataURL = gl.domElement.toDataURL("image/png");
+                resolve(dataURL);
+              } else {
+                console.warn("threeRef.current is null - skipping snapshot for", viewName);
+                resolve(null);
+              }
+            } catch (err) {
+              console.error("Error capturing snapshot for", viewName, err);
+              resolve(null);
+            }
+          }, 250); // 250ms delay for view state transition
+        });
+      };
+
+      // Helper function to flatten PNG to JPEG with white background for PDF compatibility
+      const pngToJpeg = (pngDataUrl) => {
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext("2d");
+            
+            // Draw white background
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw the PNG image
+            ctx.drawImage(img, 0, 0);
+            
+            // Export as JPEG with 80% quality
+            resolve(canvas.toDataURL("image/jpeg", 0.8));
+          };
+          img.onerror = () => {
+            resolve(pngDataUrl); // Fallback to original
+          };
+          img.src = pngDataUrl;
+        });
+      };
+
+      // Capture Front PNG
+      const frontPngUrl = await captureView("front");
+      
+      // Capture Back PNG
+      const backPngUrl = await captureView("back");
+
+      // Restore original view
+      setCurrentView(originalView);
+
+      if (!frontPngUrl || !backPngUrl) {
+        throw new Error("Could not capture 3D views of the jersey. Please try again.");
+      }
+
+      // Convert transparent PNGs to solid JPEGs to reduce size and fix rendering bugs in PDF
+      const frontDataUrl = await pngToJpeg(frontPngUrl);
+      const backDataUrl = await pngToJpeg(backPngUrl);
+
+      // 2. Generate summary PDF client-side using jsPDF
+      toast.loading("Generating design summary PDF...", { id: loadingToastId });
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF();
+
+      // Title
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.setTextColor(164, 35, 37); // Brand color #A42325
+      doc.text("Big Fish - Custom T-Shirt Design Summary", 14, 20);
+
+      // Metadata
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.setTextColor(50, 50, 50);
+      doc.text(`Shopify Store: ${queryParams.shopifyBaseUrl || "N/A"}`, 14, 32);
+      doc.text(`Quick ID: ${queryParams.quinckId || "N/A"}`, 14, 39);
+      doc.text(`Quantity: ${qty}`, 14, 46);
+
+      const customTextVal = textLayers.map(l => l.text).join(", ") || state.frontText || state.backText || "N/A";
+      doc.text(`Custom Text: ${customTextVal}`, 14, 53);
+
+      // Design choices
+      doc.setFont("helvetica", "bold");
+      doc.text("Design Details:", 14, 65);
+      doc.setFont("helvetica", "normal");
+      let y = 72;
+      doc.text(`Base Jersey Style: ${selectedDesign}`, 14, y); y += 7;
+      doc.text(`Collar: ${state.collarType || "None"} (${state.collar ? "Yes" : "No"})`, 14, y); y += 7;
+      doc.text(`Sleeve: ${state.sleeve}`, 14, y); y += 7;
+      doc.text(`Fabric: ${state.fabric}`, 14, y); y += 7;
+      doc.text(`Primary Color: ${state.primaryColorSide === "Both" ? state.primary : `Front: ${state.primaryFront}, Back: ${state.primaryBack}`}`, 14, y); y += 7;
+      doc.text(`Secondary Color: ${state.secondary}`, 14, y); y += 7;
+
+      // Add pages for images
+      doc.addPage();
+      doc.setFont("helvetica", "bold");
+      doc.text("Front Design Preview", 14, 20);
+      doc.addImage(frontDataUrl, "JPEG", 15, 30, 180, 180);
+
+      doc.addPage();
+      doc.setFont("helvetica", "bold");
+      doc.text("Back Design Preview", 14, 20);
+      doc.addImage(backDataUrl, "JPEG", 15, 30, 180, 180);
+
+      const pdfBlob = new Blob([doc.output("arraybuffer")], { type: "application/pdf" });
+
+      // 3. Assemble FormData
+      toast.loading("Uploading files and saving design...", { id: loadingToastId });
+      const formData = new FormData();
+
+      // Helper function to convert base64 to File
+      const dataURLtoFile = (dataurl, filename) => {
+        const arr = dataurl.split(",");
+        const mime = arr[0].match(/:(.*?);/)[1];
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) {
+          u8arr[n] = bstr.charCodeAt(n);
+        }
+        return new File([u8arr], filename, { type: mime });
+      };
+
+      const frontFile = dataURLtoFile(frontPngUrl, "front-view.png");
+      const backFile = dataURLtoFile(backPngUrl, "back-view.png");
+      const pdfFile = new File([pdfBlob], "design-summary.pdf", { type: "application/pdf" });
+
+      formData.append("quinckId", queryParams.quinckId);
+      formData.append("ForntSideImage", frontFile);
+      formData.append("BackSideImage", backFile);
+      formData.append("CustomText", customTextVal);
+      formData.append("Quintity", qty);
+      formData.append("ShopifyBaseUrl", queryParams.shopifyBaseUrl);
+      formData.append("PdfLink", pdfFile);
+
+      // 4. Hit POST API
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        body: formData,
+      });
+
+      console.log("my response", response);
+      if (!response.ok) {
+        const errJson = await response.json();
+        throw new Error(errJson.message || "Failed to submit custom design.");
+      }
+
+      const result = await response.json();
+      setCheckoutResult(result);
+      toast.success("Design saved successfully! Proceeding to checkout...", {
+        id: loadingToastId,
+      });
+
+    } catch (err) {
+      console.error("Checkout process failed:", err);
+      toast.error(err.message || "Checkout failed. Please try again.", {
+        id: loadingToastId,
+      });
+    } finally {
+      setIsCheckoutLoading(false);
+    }
+  };
+
   const handleExport = () => {
     const triggerLocalDownload = (dataUrl, fileName) => {
+
+      console.log("my data", dataUrl, fileName)
+
       try {
         const link = document.createElement("a");
         link.href = dataUrl;
@@ -852,10 +1051,10 @@ export default function CustomizerLayout() {
         prev.map((l) =>
           l.id === id
             ? {
-                ...l,
-                x: snapResultX.value,
-                y: snapResultY.value,
-              }
+              ...l,
+              x: snapResultX.value,
+              y: snapResultY.value,
+            }
             : l,
         ),
       );
@@ -937,7 +1136,7 @@ export default function CustomizerLayout() {
     const handleMouseMove = (moveEvent) => {
       const curDist = Math.sqrt(
         Math.pow(moveEvent.clientX - centerX, 2) +
-          Math.pow(moveEvent.clientY - centerY, 2),
+        Math.pow(moveEvent.clientY - centerY, 2),
       );
       const newScale = Math.max(0.01, startScale * (curDist / startDist));
 
@@ -1276,11 +1475,10 @@ export default function CustomizerLayout() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`relative group py-2.5 rounded-xl flex flex-col items-center justify-center cursor-pointer gap-1 transition-all duration-300 w-16 ${
-                isActive
-                  ? "text-[#00263C]"
-                  : "text-zinc-400 hover:text-[#00263C]"
-              }`}
+              className={`relative group py-2.5 rounded-xl flex flex-col items-center justify-center cursor-pointer gap-1 transition-all duration-300 w-16 ${isActive
+                ? "text-[#00263C]"
+                : "text-zinc-400 hover:text-[#00263C]"
+                }`}
             >
               {/* Highlight background pill for active state */}
               {isActive && (
@@ -1292,17 +1490,15 @@ export default function CustomizerLayout() {
               )}
 
               <tab.icon
-                className={`w-5 h-5 transition-transform duration-300 ${
-                  isActive ? "scale-110" : "group-hover:scale-105"
-                }`}
+                className={`w-5 h-5 transition-transform duration-300 ${isActive ? "scale-110" : "group-hover:scale-105"
+                  }`}
               />
 
               <span
-                className={`text-[10px] tracking-wide text-center transition-all duration-300 ${
-                  isActive
-                    ? "font-bold"
-                    : "font-medium text-zinc-500 group-hover:text-[#00263C]"
-                }`}
+                className={`text-[10px] tracking-wide text-center transition-all duration-300 ${isActive
+                  ? "font-bold"
+                  : "font-medium text-zinc-500 group-hover:text-[#00263C]"
+                  }`}
               >
                 {tab.label}
               </span>
@@ -1412,7 +1608,7 @@ export default function CustomizerLayout() {
             Design
             {state.collar ? ` • ${state.collarType} Collar` : ""}
             {state.collar &&
-            (state.collarType === "Polo" || state.collarType === "Henley")
+              (state.collarType === "Polo" || state.collarType === "Henley")
               ? ` (${state.zipper ? "Zipper" : "Buttons"})`
               : ""}
           </span>
@@ -1510,7 +1706,7 @@ export default function CustomizerLayout() {
                 onChange={(e) =>
                   setQty(Math.max(1, parseInt(e.target.value) || 1))
                 }
-                className="w-full border border-zinc-200 rounded-xl p-2.5 text-center font-bold focus:outline-red-500 text-lg"
+                className="w-full border border-zinc-200 rounded p-2.5 text-center font-bold focus:outline-red-500 text-lg"
               />
 
               <div className="text-[11px] text-green-600 mt-2 font-semibold text-center">
@@ -1531,18 +1727,136 @@ export default function CustomizerLayout() {
               $
               {calculatePrice() +
                 (state.collar &&
-                (state.collarType === "Polo" ||
-                  state.collarType === "Henley") &&
-                state.zipper
+                  (state.collarType === "Polo" ||
+                    state.collarType === "Henley") &&
+                  state.zipper
                   ? 5 * qty
                   : 0)}
             </span>
           </div>
-          <button className="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-lg shadow-red-600/30 flex items-center justify-center gap-2 transition-all hover:scale-[1.02] text-sm">
-            <ShoppingCart className="w-5 h-5" /> Proceed to Checkout
+          <button
+            onClick={handleCheckout}
+            disabled={isCheckoutLoading}
+            className="w-full py-4 bg-[#A42325] hover:bg-[#A42325]/80 text-white rounded font-bold shadow-lg shadow-[#A42325]/30 flex items-center justify-center gap-2 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isCheckoutLoading ? (
+              <>
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Processing Checkout...
+              </>
+            ) : (
+              <>
+                <ShoppingCart className="w-5 h-5" /> Proceed to Checkout
+              </>
+            )}
           </button>
         </div>
       </div>
+
+      <AnimatePresence>
+        {checkoutResult && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-zinc-100 flex flex-col font-sans"
+            >
+              <div className="p-6 text-center border-b border-zinc-100 bg-zinc-50/50">
+                <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 text-green-600 mb-4">
+                  <svg className="h-10 w-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <h3 className="text-2xl font-extrabold text-zinc-900">Design Saved Successfully!</h3>
+                <p className="text-sm text-zinc-500 mt-1">Your design has been processed and stored on AWS S3 & MongoDB.</p>
+              </div>
+
+              <div className="p-6 space-y-4 flex-1 text-sm text-zinc-600 overflow-y-auto">
+                <div className="grid grid-cols-3 gap-2 py-2 border-b border-zinc-100 font-medium">
+                  <span className="text-zinc-400">Parameter</span>
+                  <span className="col-span-2 text-zinc-900">Value</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <span className="font-semibold text-zinc-400">Quick ID</span>
+                  <span className="col-span-2 font-bold text-zinc-800 break-all">{checkoutResult.quinckId || "N/A"}</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <span className="font-semibold text-zinc-400">Quantity</span>
+                  <span className="col-span-2 font-bold text-zinc-800">{checkoutResult.Quintity}</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <span className="font-semibold text-zinc-400">Custom Text</span>
+                  <span className="col-span-2 font-medium text-zinc-700">{checkoutResult.CustomText || "None"}</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <span className="font-semibold text-zinc-400">Front Preview</span>
+                  <a href={checkoutResult.ForntSideImage} target="_blank" rel="noopener noreferrer" className="col-span-2 text-blue-600 font-semibold hover:underline break-all">
+                    View Front Image URL
+                  </a>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <span className="font-semibold text-zinc-400">Back Preview</span>
+                  <a href={checkoutResult.BackSideImage} target="_blank" rel="noopener noreferrer" className="col-span-2 text-blue-600 font-semibold hover:underline break-all">
+                    View Back Image URL
+                  </a>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <span className="font-semibold text-zinc-400">PDF Summary</span>
+                  <a href={checkoutResult.PdfLink} target="_blank" rel="noopener noreferrer" className="col-span-2 text-red-600 font-semibold hover:underline break-all flex items-center gap-1.5">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                    </svg>
+                    Download Summary PDF
+                  </a>
+                </div>
+              </div>
+
+              <div className="p-4 bg-zinc-50 border-t border-zinc-100 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCheckoutResult(null)}
+                  className="flex-1 py-3 border border-zinc-200 text-zinc-700 rounded-xl font-bold hover:bg-zinc-100 transition-colors"
+                >
+                  Configure More
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const baseUrl = "https://juailary.myshopify.com/products/picasso-touch-touch-change-garura-parent-child-promo-psa-graded";
+                    const params = new URLSearchParams({
+                      orderId: checkoutResult._id || checkoutResult.quinckId || "",
+                      quantity: String(checkoutResult.Quintity || qty || 1),
+                      frontImage: checkoutResult.ForntSideImage || "",
+                      backimage: checkoutResult.BackSideImage || "",
+                      pdfLink: checkoutResult.PdfLink || "",
+                      customText: checkoutResult.CustomText || "",
+                    });
+                    window.location.href = `${baseUrl}?${params.toString()}`;
+                  }}
+                  className="flex-1 py-3 bg-[#A42325] text-white rounded-xl font-bold hover:bg-[#A42325]/90 transition-colors shadow-lg shadow-[#A42325]/20"
+                >
+                  Go to Shopify
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
