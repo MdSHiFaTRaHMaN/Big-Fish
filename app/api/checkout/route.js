@@ -36,6 +36,7 @@ async function uploadFile(file, folderName, resourceType = "image") {
         const uploadOptions = {
           folder: `tshirt-designs/${folderName}`,
           resource_type: resourceType,
+          type: "upload",
         };
 
         // For raw resource type (PDFs), include the extension in the public_id
@@ -50,8 +51,10 @@ async function uploadFile(file, folderName, resourceType = "image") {
         const uploadStream = cloudinary.uploader.upload_stream(
           uploadOptions,
           (error, result) => {
+            console.log("Cloudinary Result:", result);
+
             if (error) {
-              console.error("Cloudinary upload error:", error);
+              console.error(error);
               reject(error);
             } else {
               resolve(result.secure_url);
@@ -104,8 +107,8 @@ export async function POST(req) {
     // Images (PNG) → resource_type: "image"
     // PDF          → resource_type: "raw"  (preserves .pdf extension in Cloudinary URL)
     const frontUrl = await uploadFile(FrontSideImage, "front", "image");
-    const backUrl  = await uploadFile(BackSideImage,  "back",  "image");
-    const pdfUrl   = await uploadFile(PdfFile,        "summary", "raw");
+    const backUrl = await uploadFile(BackSideImage, "back", "image");
+    const pdfUrl = await uploadFile(PdfFile, "summary", "raw");
 
     // Save design to MongoDB
     const newDesign = new Design({
