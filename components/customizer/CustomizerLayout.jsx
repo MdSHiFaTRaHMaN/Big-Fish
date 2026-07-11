@@ -1966,7 +1966,13 @@ export default function CustomizerLayout() {
                 <button
                   type="button"
                   onClick={() => {
-                    const baseUrl = "https://bigfish170.com/products/bigfish-custom-product";
+                    // Use ShopifyBaseUrl from checkoutResult (saved from query param in DB)
+                    // Fallback to queryParams.shopifyBaseUrl, then to hardcoded URL
+                    const baseUrl =
+                      checkoutResult.ShopifyBaseUrl ||
+                      queryParams.shopifyBaseUrl ||
+                      "https://bigfish170.com/products/bigfish-custom-product";
+
                     const params = new URLSearchParams({
                       orderId: checkoutResult._id || checkoutResult.quinckId || "",
                       quantity: String(checkoutResult.Quintity || qty || 1),
@@ -1975,7 +1981,7 @@ export default function CustomizerLayout() {
                       pdfLink: checkoutResult.PdfLink || "",
                       customText: checkoutResult.CustomText || "",
                     });
-                    window.location.href = `${baseUrl}?${params.toString()}`;
+                    window.open(`${baseUrl}?${params.toString()}`, "_blank");
                   }}
                   className="flex-1 py-3 bg-[#A42325] text-white rounded-xl font-bold hover:bg-[#A42325]/90 transition-colors shadow-lg shadow-[#A42325]/20"
                 >
