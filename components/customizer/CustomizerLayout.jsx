@@ -1876,7 +1876,7 @@ export default function CustomizerLayout() {
               initial={{ scale: 0.95, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 20 }}
-              className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-zinc-100 flex flex-col font-sans"
+              className="bg-white rounded shadow-2xl max-w-lg w-full overflow-hidden border border-zinc-100 flex flex-col font-sans"
             >
               <div className="p-6 text-center border-b border-zinc-100 bg-zinc-50/50">
                 <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 text-green-600 mb-4">
@@ -1884,19 +1884,13 @@ export default function CustomizerLayout() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7"></path>
                   </svg>
                 </div>
-                <h3 className="text-2xl font-extrabold text-zinc-900">Design Saved Successfully!</h3>
-                <p className="text-sm text-zinc-500 mt-1">Your design has been processed and stored on AWS S3 & MongoDB.</p>
+                <h3 className="text-2xl font-extrabold text-zinc-900">Please Check Your Design</h3>
               </div>
 
               <div className="p-6 space-y-4 flex-1 text-sm text-zinc-600 overflow-y-auto">
                 <div className="grid grid-cols-3 gap-2 py-2 border-b border-zinc-100 font-medium">
                   <span className="text-zinc-400">Parameter</span>
                   <span className="col-span-2 text-zinc-900">Value</span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <span className="font-semibold text-zinc-400">Quick ID</span>
-                  <span className="col-span-2 font-bold text-zinc-800 break-all">{checkoutResult.quinckId || "N/A"}</span>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
@@ -1959,7 +1953,7 @@ export default function CustomizerLayout() {
                 <button
                   type="button"
                   onClick={() => setCheckoutResult(null)}
-                  className="flex-1 py-3 border border-zinc-200 text-zinc-700 rounded-xl font-bold hover:bg-zinc-100 transition-colors"
+                  className="flex-1 py-3 border border-[#A42325] text-zinc-700 rounded font-bold hover:bg-zinc-100 transition-colors"
                 >
                   Configure More
                 </button>
@@ -1983,9 +1977,9 @@ export default function CustomizerLayout() {
                     });
                     window.open(`${baseUrl}?${params.toString()}`, "_blank");
                   }}
-                  className="flex-1 py-3 bg-[#A42325] text-white rounded-xl font-bold hover:bg-[#A42325]/90 transition-colors shadow-lg shadow-[#A42325]/20"
+                  className="flex-1 py-3 bg-[#A42325] text-white rounded font-bold hover:bg-[#A42325]/90 transition-colors shadow-lg shadow-[#A42325]/20"
                 >
-                  Go to Shopify
+                  Proceed to Buy
                 </button>
               </div>
             </motion.div>
