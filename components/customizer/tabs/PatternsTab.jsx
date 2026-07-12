@@ -1,12 +1,88 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useCustomizerStore } from "../useCustomizerStore";
 import { Toggle, PATTERN_DEFAULT_COLORS } from "../JerseyPresets";
+
+// Built-in static patterns (always shown)
+const STATIC_PATTERNS = [
+  { id: "None", label: "Solid Color", url: "" },
+  {
+    id: "/assets/images/patterns/pattern_1.png",
+    label: "Pattern 1",
+    url: "/assets/images/patterns/pattern_1.png",
+  },
+  {
+    id: "/assets/images/patterns/pattern_2.png",
+    label: "Pattern 2",
+    url: "/assets/images/patterns/pattern_2.png",
+  },
+  {
+    id: "/assets/images/patterns/pattern_3.png",
+    label: "Pattern 3",
+    url: "/assets/images/patterns/pattern_3.png",
+  },
+  {
+    id: "/assets/images/patterns/pattern_4.png",
+    label: "Pattern 4",
+    url: "/assets/images/patterns/pattern_4.png",
+  },
+  {
+    id: "/assets/images/patterns/pattern_5.png",
+    label: "Pattern 5",
+    url: "/assets/images/patterns/pattern_5.png",
+  },
+];
 
 export default function PatternsTab() {
   const state = useCustomizerStore((s) => s.state);
   const updateState = useCustomizerStore((s) => s.updateState);
   const activePatternSide = useCustomizerStore((s) => s.activePatternSide);
   const setActivePatternSide = useCustomizerStore((s) => s.setActivePatternSide);
+  const loadedPatterns = useCustomizerStore((s) => s.loadedPatterns);
+  const setLoadedPatterns = useCustomizerStore((s) => s.setLoadedPatterns);
+
+  // Dynamic patterns from admin dashboard
+  const [dynamicPatterns, setDynamicPatterns] = useState([]);
+  const [loadingDynamic, setLoadingDynamic] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/patterns")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && data.patterns.length > 0) {
+          setDynamicPatterns(
+            data.patterns.map((p) => ({
+              id: p.url,         // Cloudinary URL acts as the unique ID
+              label: p.label,
+              url: p.url,
+            }))
+          );
+        }
+      })
+      .catch((e) => console.error("Error fetching custom patterns:", e))
+      .finally(() => setLoadingDynamic(false));
+  }, []);
+
+  // Preload newly discovered dynamic pattern images into loadedPatterns store
+  useEffect(() => {
+    dynamicPatterns.forEach((p) => {
+      if (!loadedPatterns[p.url]) {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = p.url;
+        img.onload = () => {
+          setLoadedPatterns((prev) => ({ ...prev, [p.url]: img }));
+        };
+      }
+    });
+  }, [dynamicPatterns, loadedPatterns, setLoadedPatterns]);
+
+  // Merge static + dynamic, filter out duplicate IDs
+  const allPatterns = [
+    ...STATIC_PATTERNS,
+    ...dynamicPatterns.filter(
+      (d) => !STATIC_PATTERNS.find((s) => s.id === d.id)
+    ),
+  ];
 
   const selectedPattern =
     activePatternSide === "Front"
@@ -69,35 +145,9 @@ export default function PatternsTab() {
         </button>
       </div>
 
+      {/* Patterns Grid */}
       <div className="grid grid-cols-2 gap-3 pt-1">
-        {[
-          { id: "None", label: "Solid Color", url: "" },
-          {
-            id: "/assets/images/patterns/pattern_1.png",
-            label: "Pattern 1",
-            url: "/assets/images/patterns/pattern_1.png",
-          },
-          {
-            id: "/assets/images/patterns/pattern_2.png",
-            label: "Pattern 2",
-            url: "/assets/images/patterns/pattern_2.png",
-          },
-          {
-            id: "/assets/images/patterns/pattern_3.png",
-            label: "Pattern 3",
-            url: "/assets/images/patterns/pattern_3.png",
-          },
-          {
-            id: "/assets/images/patterns/pattern_4.png",
-            label: "Pattern 4",
-            url: "/assets/images/patterns/pattern_4.png",
-          },
-          {
-            id: "/assets/images/patterns/pattern_5.png",
-            label: "Pattern 5",
-            url: "/assets/images/patterns/pattern_5.png",
-          },
-        ].map((p) => {
+        {allPatterns.map((p) => {
           const isSelected =
             activePatternSide === "Front"
               ? state.fabricPatternFront === p.id
@@ -130,6 +180,7 @@ export default function PatternsTab() {
                     src={p.url}
                     alt={p.label}
                     className="w-full h-full object-cover"
+                    crossOrigin="anonymous"
                   />
                 )}
               </div>
@@ -145,7 +196,26 @@ export default function PatternsTab() {
             </button>
           );
         })}
+
+        {/* Loading skeleton for dynamic patterns */}
+        {loadingDynamic && (
+          <div className="flex flex-col p-2.5 rounded-lg border border-zinc-100 animate-pulse">
+            <div className="w-full h-20 rounded-lg bg-zinc-200 mb-2" />
+            <div className="h-3 w-2/3 mx-auto bg-zinc-200 rounded" />
+          </div>
+        )}
       </div>
+
+      {/* Dynamic section header when custom patterns exist */}
+      {!loadingDynamic && dynamicPatterns.length > 0 && (
+        <div className="flex items-center gap-2 pt-1">
+          <div className="flex-1 h-px bg-zinc-100" />
+          <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-1">
+            Custom Patterns
+          </span>
+          <div className="flex-1 h-px bg-zinc-100" />
+        </div>
+      )}
 
       {/* Pattern Color Customizer UI */}
       {selectedPattern && selectedPattern !== "None" && (

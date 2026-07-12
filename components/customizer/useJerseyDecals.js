@@ -507,11 +507,11 @@ export function useJerseyDecals(state) {
       texture.minFilter = THREE.LinearFilter;
       texture.magFilter = THREE.LinearFilter;
 
-      // The 3D Decal box scale for the torso is [0.54, 0.7, 0.32]. This non-square projection
-      // naturally squishes the 1024x1024 square canvas horizontally by a factor of 0.54 / 0.7.
+      // The 3D Decal box scale for the torso is [0.54, 0.86, 0.32]. This non-square projection
+      // naturally squishes the 1024x1024 square canvas horizontally by a factor of 0.54 / 0.86.
       // We apply an inverse mathematical multiplier to stretch the texture back out dynamically,
       // creating a perfect 1:1 mirror of the 2D visual layout without squeezing the logo.
-      const meshDecalAspectRatio = 0.54 / 0.7;
+      const meshDecalAspectRatio = 0.54 / 0.86;
       texture.repeat.set(meshDecalAspectRatio, 1);
       texture.offset.set((1 - meshDecalAspectRatio) / 2, 0);
 
@@ -775,6 +775,108 @@ export function useJerseyDecals(state) {
       ctx.save();
       ctx.fillStyle = sec;
       ctx.strokeStyle = sec;
+
+      // Check if it is a dynamic custom shape from admin dashboard
+      const isBuiltIn = [
+        "strike", "save", "fastbreak", "final", "victory", "city", 
+        "pure", "level", "vivo", "orion", "animal", "avatar", 
+        "league", "magic", "raid", "rush", "score"
+      ].includes(dp);
+
+      if (!isBuiltIn && state.dynamicShapes) {
+        const shape = state.dynamicShapes.find((s) => s.id === dp);
+        if (shape && shape.svgElements) {
+          try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(`<svg>${shape.svgElements}</svg>`, 'image/svg+xml');
+            const elements = doc.querySelectorAll('rect, polygon, path, circle, line');
+
+            elements.forEach((el) => {
+              ctx.save();
+              
+              let fill = el.getAttribute('fill') || '';
+              let stroke = el.getAttribute('stroke') || 'transparent';
+              let strokeWidth = parseFloat(el.getAttribute('stroke-width') || el.getAttribute('strokeWidth') || '0');
+              let opacity = parseFloat(el.getAttribute('opacity') || '1');
+
+              const resolveColor = (val) => {
+                if (!val) return 'transparent';
+                return val.replace(/\{primary\}/g, pri).replace(/\{secondary\}/g, sec);
+              };
+
+              fill = resolveColor(fill);
+              stroke = resolveColor(stroke);
+
+              ctx.fillStyle = fill;
+              ctx.strokeStyle = stroke;
+              ctx.lineWidth = strokeWidth * sc;
+              ctx.globalAlpha = opacity;
+
+              const tagName = el.tagName.toLowerCase();
+              if (tagName === 'rect') {
+                const x = parseFloat(el.getAttribute('x') || '0') * sc;
+                const y = parseFloat(el.getAttribute('y') || '0') * sc;
+                const w = parseFloat(el.getAttribute('width') || '0') * sc;
+                const h = parseFloat(el.getAttribute('height') || '0') * sc;
+                ctx.fillRect(x, y, w, h);
+                if (stroke && stroke !== 'transparent' && strokeWidth > 0) {
+                  ctx.strokeRect(x, y, w, h);
+                }
+              } else if (tagName === 'polygon') {
+                const pointsStr = el.getAttribute('points') || '';
+                const pairs = pointsStr.trim().split(/\s+/);
+                if (pairs.length > 0) {
+                  ctx.beginPath();
+                  pairs.forEach((pair, idx) => {
+                    const [px, py] = pair.split(',').map(parseFloat);
+                    if (!isNaN(px) && !isNaN(py)) {
+                      if (idx === 0) ctx.moveTo(px * sc, py * sc);
+                      else ctx.lineTo(px * sc, py * sc);
+                    }
+                  });
+                  ctx.closePath();
+                  if (fill && fill !== 'transparent') ctx.fill();
+                  if (stroke && stroke !== 'transparent' && strokeWidth > 0) ctx.stroke();
+                }
+              } else if (tagName === 'circle') {
+                const cx = parseFloat(el.getAttribute('cx') || '0') * sc;
+                const cy = parseFloat(el.getAttribute('cy') || '0') * sc;
+                const r = parseFloat(el.getAttribute('r') || '0') * sc;
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                if (fill && fill !== 'transparent') ctx.fill();
+                if (stroke && stroke !== 'transparent' && strokeWidth > 0) ctx.stroke();
+              } else if (tagName === 'line') {
+                const x1 = parseFloat(el.getAttribute('x1') || '0') * sc;
+                const y1 = parseFloat(el.getAttribute('y1') || '0') * sc;
+                const x2 = parseFloat(el.getAttribute('x2') || '0') * sc;
+                const y2 = parseFloat(el.getAttribute('y2') || '0') * sc;
+                ctx.beginPath();
+                ctx.moveTo(x1 * sc, y1 * sc);
+                ctx.lineTo(x2 * sc, y2 * sc);
+                if (stroke && stroke !== 'transparent' && strokeWidth > 0) ctx.stroke();
+              } else if (tagName === 'path') {
+                const d = el.getAttribute('d') || '';
+                try {
+                  const p = new Path2D(d);
+                  ctx.scale(sc, sc);
+                  if (fill && fill !== 'transparent') ctx.fill(p);
+                  if (stroke && stroke !== 'transparent' && strokeWidth > 0) {
+                    ctx.lineWidth = strokeWidth;
+                    ctx.stroke(p);
+                  }
+                } catch (pathErr) {
+                  console.error("Path2D error:", pathErr);
+                }
+              }
+              ctx.restore();
+            });
+          } catch (e) {
+            console.error("Error parsing dynamic SVG pattern:", e);
+          }
+        }
+      }
+
       switch (dp) {
         case "strike":
           ctx.globalAlpha = 1.0;
