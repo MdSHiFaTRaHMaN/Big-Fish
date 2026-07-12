@@ -95,6 +95,17 @@ export async function POST(req) {
     const Quantity = parseInt(formData.get("Quintity")) || 1;
     const ShopifyBaseUrl = formData.get("ShopifyBaseUrl") || "";
     const PdfFile = formData.get("PdfLink");
+    const GlbFile = formData.get("GlbLink");
+    const designStateStr = formData.get("designState") || "";
+
+    let designState = null;
+    if (designStateStr) {
+      try {
+        designState = JSON.parse(designStateStr);
+      } catch (e) {
+        console.error("Error parsing designState JSON:", e);
+      }
+    }
 
     if (!FrontSideImage || !BackSideImage || !PdfFile) {
       return NextResponse.json(
@@ -105,10 +116,11 @@ export async function POST(req) {
 
     // Upload files to Cloudinary (or local fallback)
     // Images (PNG) → resource_type: "image"
-    // PDF          → resource_type: "raw"  (preserves .pdf extension in Cloudinary URL)
+    // PDF/GLB      → resource_type: "raw"  (preserves extensions in Cloudinary URL)
     const frontUrl = await uploadFile(FrontSideImage, "front", "image");
     const backUrl = await uploadFile(BackSideImage, "back", "image");
     const pdfUrl = await uploadFile(PdfFile, "summary", "raw");
+    const glbUrl = GlbFile ? await uploadFile(GlbFile, "design-model", "raw") : "";
 
     // Save design to MongoDB
     const newDesign = new Design({
@@ -119,6 +131,8 @@ export async function POST(req) {
       Quintity: Quantity,
       ShopifyBaseUrl,
       PdfLink: pdfUrl,
+      GlbLink: glbUrl,
+      designState,
     });
 
     await newDesign.save();
@@ -133,6 +147,7 @@ export async function POST(req) {
       Quintity: newDesign.Quintity,
       ShopifyBaseUrl: newDesign.ShopifyBaseUrl,
       PdfLink: newDesign.PdfLink,
+      GlbLink: newDesign.GlbLink,
     });
 
   } catch (error) {

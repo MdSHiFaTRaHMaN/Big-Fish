@@ -356,6 +356,7 @@ export function Jersey3D({ colors, collar, texturesRef }) {
       return;
     }
     const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin("anonymous");
     loader.load(
       colors.logo,
       (tex) => {
@@ -481,7 +482,7 @@ export function Jersey3D({ colors, collar, texturesRef }) {
   const roughness = fabricConfig.roughness;
 
   return (
-    <group scale={[scaleX, 2.2, scaleZ]} position={[0, -0.1, 0]}>
+    <group name="jersey-group" scale={[scaleX, 2.2, scaleZ]} position={[0, -0.1, 0]}>
       <mesh
         castShadow
         receiveShadow
@@ -493,7 +494,7 @@ export function Jersey3D({ colors, collar, texturesRef }) {
           <Decal
             position={[0, 0.0, 0.155]}
             rotation={[0, 0, 0]}
-            scale={[0.54, 0.7, 0.32]}
+            scale={[0.54, 0.86, 0.32]}
             renderOrder={1}
           >
             <meshStandardMaterial
@@ -514,7 +515,7 @@ export function Jersey3D({ colors, collar, texturesRef }) {
           <Decal
             position={[0, 0.0, -0.155]}
             rotation={[0, Math.PI, 0]}
-            scale={[0.54, 0.7, 0.32]}
+            scale={[0.54, 0.86, 0.32]}
             renderOrder={1}
           >
             <meshStandardMaterial
@@ -536,7 +537,7 @@ export function Jersey3D({ colors, collar, texturesRef }) {
           <Decal
             position={[0, 0.0, 0.155]}
             rotation={[0, 0, 0]}
-            scale={[0.54, 0.7, 0.32]}
+            scale={[0.54, 0.86, 0.32]}
             renderOrder={10}
           >
             <meshStandardMaterial
@@ -557,7 +558,7 @@ export function Jersey3D({ colors, collar, texturesRef }) {
           <Decal
             position={[0, 0.0, -0.155]}
             rotation={[0, Math.PI, 0]}
-            scale={[0.54, 0.7, 0.32]}
+            scale={[0.54, 0.86, 0.32]}
             renderOrder={10}
           >
             <meshStandardMaterial
@@ -780,9 +781,7 @@ export default function Jersey3DViewer({ threeRef, texturesRef }) {
   const logoLayers = useCustomizerStore((s) => s.logoLayers);
   const loadedLogoImages = useCustomizerStore((s) => s.loadedLogoImages);
   const layersOrder = useCustomizerStore((s) => s.layersOrder);
-
-  const currentPattern =
-    JERSEY_DESIGNS.find((d) => d.id === selectedDesign)?.pattern || "plain";
+  const dynamicShapes = useCustomizerStore((s) => s.dynamicShapes);
 
   return (
     <Canvas
@@ -808,7 +807,8 @@ export default function Jersey3DViewer({ threeRef, texturesRef }) {
           texturesRef={texturesRef}
           colors={{
             ...state,
-            designPattern: currentPattern,
+            designPattern: selectedDesign,
+            dynamicShapes,
             loadedPatterns,
             textLayers,
             logoLayers,
