@@ -167,6 +167,7 @@ export function JerseySVG({
   secondary = "#1A1A2E",
   pattern = "plain",
   selected = false,
+  dynamicSvg = null,
 }) {
   const patterns = {
     plain: <></>,
@@ -321,7 +322,19 @@ export function JerseySVG({
       <clipPath id="jerseyClip">
         <path d="M20,8 L0,28 L18,35 L18,90 L82,90 L82,35 L100,28 L80,8 L65,18 Q50,24 35,18 Z" />
       </clipPath>
-      <g clipPath="url(#jerseyClip)">{patterns[pattern] ?? <></>}</g>
+      {/* Static pattern or dynamic admin-defined SVG */}
+      {dynamicSvg ? (
+        <g
+          clipPath="url(#jerseyClip)"
+          dangerouslySetInnerHTML={{
+            __html: dynamicSvg
+              .replace(/\{primary\}/g, primary)
+              .replace(/\{secondary\}/g, secondary),
+          }}
+        />
+      ) : (
+        <g clipPath="url(#jerseyClip)">{patterns[pattern] ?? <></>}</g>
+      )}
       {/* collar */}
       <path
         d="M38,18 Q50,30 62,18"
