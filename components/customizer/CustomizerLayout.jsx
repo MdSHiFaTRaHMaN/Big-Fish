@@ -58,6 +58,22 @@ export default function CustomizerLayout() {
   const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
   const [checkoutResult, setCheckoutResult] = useState(null);
 
+  // Dynamic pricing config from dashboard
+  const [pricingConfig, setPricingConfig] = useState({
+    basePrice: 49,
+    tiers: [
+      { minQty: 10, maxQty: 49, pricePerUnit: 39, label: "Team Discount" },
+      { minQty: 50, maxQty: null, pricePerUnit: 29, label: "Bulk Discount" },
+    ],
+    premiumFabricAddon: 10,
+    zipperAddon: 5,
+    discountMessages: {
+      tier1Message: "Add {remaining} more for team discount.",
+      tier2Message: "Team discount! Add {remaining} more for bulk rate.",
+      tier3Message: "\uD83C\uDF89 Bulk discount applied!",
+    },
+  });
+
   console.log("checkoutResult", checkoutResult)
 
   // Holds the generated PDF blob in memory — used by the Download button directly
@@ -71,6 +87,18 @@ export default function CustomizerLayout() {
         shopifyBaseUrl: params.get("shopifyBaseUrl") || "",
       });
     }
+  }, []);
+
+  // Fetch pricing config from dashboard
+  useEffect(() => {
+    fetch("/api/pricing")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && data.pricing) {
+          setPricingConfig(data.pricing);
+        }
+      })
+      .catch((e) => console.error("Pricing fetch error:", e));
   }, []);
 
   const threeRef = useRef(null);
@@ -685,11 +713,47 @@ export default function CustomizerLayout() {
         });
       };
 
+      // Helper to capture GLB model using Three's GLTFExporter
+      const captureGLB = () => {
+        return new Promise(async (resolve) => {
+          try {
+            if (!threeRef.current) {
+              console.warn("threeRef.current is null - skipping GLB export");
+              resolve(null);
+              return;
+            }
+            const { scene } = threeRef.current;
+            const target = scene.getObjectByName("jersey-group") || scene;
+
+            const { GLTFExporter } = await import("three/examples/jsm/exporters/GLTFExporter.js");
+            const exporter = new GLTFExporter();
+            exporter.parse(
+              target,
+              (gltf) => {
+                const blob = new Blob([gltf], { type: "model/gltf-binary" });
+                resolve(blob);
+              },
+              (err) => {
+                console.error("GLTFExporter failed to parse:", err);
+                resolve(null);
+              },
+              { binary: true }
+            );
+          } catch (err) {
+            console.error("Error during GLB model export:", err);
+            resolve(null);
+          }
+        });
+      };
+
       // Capture Front PNG
       const frontPngUrl = await captureView("front");
 
       // Capture Back PNG
       const backPngUrl = await captureView("back");
+
+      // Capture GLB model
+      const glbBlob = await captureGLB();
 
       // Restore original view
       setCurrentView(originalView);
@@ -880,6 +944,19 @@ export default function CustomizerLayout() {
       formData.append("Quintity", qty);
       formData.append("ShopifyBaseUrl", queryParams.shopifyBaseUrl);
       formData.append("PdfLink", pdfFile);
+      if (glbBlob) {
+        const glbFile = new File([glbBlob], "jersey-model.glb", { type: "model/gltf-binary" });
+        formData.append("GlbLink", glbFile);
+      }
+
+      // Serialize customized state details for 3D web preview page
+      const designStatePayload = {
+        state,
+        textLayers,
+        logoLayers,
+        selectedDesign,
+      };
+      formData.append("designState", JSON.stringify(designStatePayload));
 
       // 4. Hit POST API
       const response = await fetch("/api/checkout", {
@@ -1541,12 +1618,42 @@ export default function CustomizerLayout() {
     reader.readAsDataURL(file);
   };
 
+  // Dynamic price per unit based on quantity tiers
+  const getPricePerUnit = (quantity = qty) => {
+    const sorted = [...(pricingConfig.tiers || [])].sort(
+      (a, b) => b.minQty - a.minQty
+    );
+    for (const tier of sorted) {
+      if (quantity >= tier.minQty) return tier.pricePerUnit;
+    }
+    return pricingConfig.basePrice;
+  };
+
   const calculatePrice = () => {
-    let base = 49;
-    if (qty >= 10 && qty < 50) base = 39;
-    if (qty >= 50) base = 29;
-    if (state.fabric === "Premium") base += 10;
+    let base = getPricePerUnit();
+    if (state.fabric === "Premium") base += (pricingConfig.premiumFabricAddon ?? 10);
     return base * qty;
+  };
+
+  // Discount message helper
+  const getDiscountMessage = () => {
+    const tiers = [...(pricingConfig.tiers || [])].sort((a, b) => a.minQty - b.minQty);
+    const msgs = pricingConfig.discountMessages || {};
+    // If we have at least 2 tiers (team + bulk)
+    const t1 = tiers[0]; // e.g. min 10
+    const t2 = tiers[1]; // e.g. min 50
+    if (t2 && qty >= t2.minQty) {
+      return msgs.tier3Message || "\uD83C\uDF89 Bulk discount applied!";
+    }
+    if (t2 && t1 && qty >= t1.minQty) {
+      const remaining = t2.minQty - qty;
+      return (msgs.tier2Message || "Team discount! Add {remaining} more for bulk rate.").replace("{remaining}", remaining);
+    }
+    if (t1) {
+      const remaining = t1.minQty - qty;
+      return (msgs.tier1Message || "Add {remaining} more for team discount.").replace("{remaining}", remaining);
+    }
+    return "";
   };
 
   const currentPattern =
@@ -1777,13 +1884,13 @@ export default function CustomizerLayout() {
             <div className="flex justify-between text-sm">
               <span className="text-zinc-500">Base Jersey</span>
               <span className="font-bold text-zinc-900">
-                ${qty >= 10 ? (qty >= 50 ? "29" : "39") : "49"}
+                ${getPricePerUnit()}<span className="text-xs font-normal text-zinc-400">/ea</span>
               </span>
             </div>
             {state.fabric === "Premium" && (
               <div className="flex justify-between text-sm">
                 <span className="text-zinc-500">Premium Fabric</span>
-                <span className="font-bold text-zinc-900">+$10</span>
+                <span className="font-bold text-zinc-900">+${pricingConfig.premiumFabricAddon ?? 10}</span>
               </div>
             )}
             {state.collar && (
@@ -1798,7 +1905,7 @@ export default function CustomizerLayout() {
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Closure</span>
                   <span className="font-bold text-zinc-900">
-                    {state.zipper ? "Zipper (+$5)" : "Button Placket"}
+                    {state.zipper ? `Zipper (+$${pricingConfig.zipperAddon ?? 5})` : "Button Placket"}
                   </span>
                 </div>
               )}
@@ -1818,11 +1925,7 @@ export default function CustomizerLayout() {
               />
 
               <div className="text-[11px] text-green-600 mt-2 font-semibold text-center">
-                {qty >= 50
-                  ? "🎉 50+ Bulk discount applied!"
-                  : qty >= 10
-                    ? `Team discount! Add ${50 - qty} more for bulk rate.`
-                    : `Add ${10 - qty} more for team discount.`}
+                {getDiscountMessage()}
               </div>
             </div>
           </div>
@@ -1838,7 +1941,7 @@ export default function CustomizerLayout() {
                   (state.collarType === "Polo" ||
                     state.collarType === "Henley") &&
                   state.zipper
-                  ? 5 * qty
+                  ? (pricingConfig.zipperAddon ?? 5) * qty
                   : 0)}
             </span>
           </div>
@@ -1947,6 +2050,39 @@ export default function CustomizerLayout() {
                     Download Summary PDF
                   </button>
                 </div>
+
+                {checkoutResult.GlbLink && (
+                  <div className="grid grid-cols-3 gap-2 border-t border-zinc-100 pt-2">
+                    <span className="font-semibold text-zinc-400">3D Model</span>
+                    <a
+                      href={checkoutResult.GlbLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="col-span-2 text-indigo-600 font-semibold hover:underline break-all flex items-center gap-1.5"
+                    >
+                      <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1V5a2 2 0 00-2-2H4a2 2 0 00-2 2v2m18 0l-8-4-8 4m0 0l2 1m-2-1v12a2 2 0 002 2h12a2 2 0 002-2V7m-2 1l-2-1"></path>
+                      </svg>
+                      Download 3D Model (GLB)
+                    </a>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-2 border-t border-zinc-100 pt-2">
+                  <span className="font-semibold text-zinc-400">3D Preview</span>
+                  <a
+                    href={`/preview/${checkoutResult._id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="col-span-2 text-green-600 font-semibold hover:underline break-all flex items-center gap-1.5"
+                  >
+                    <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                    </svg>
+                    View Interactive 3D Web View
+                  </a>
+                </div>
               </div>
 
               <div className="p-4 bg-zinc-50 border-t border-zinc-100 flex gap-3">
@@ -1967,12 +2103,17 @@ export default function CustomizerLayout() {
                       queryParams.shopifyBaseUrl ||
                       "https://bigfish170.com/products/bigfish-custom-product";
 
+                    const localOrigin = typeof window !== "undefined" ? window.location.origin : "";
+                    const previewUrl = `${localOrigin}/preview/${checkoutResult._id}`;
+
                     const params = new URLSearchParams({
                       orderId: checkoutResult._id || checkoutResult.quinckId || "",
                       quantity: String(checkoutResult.Quintity || qty || 1),
                       frontImage: checkoutResult.ForntSideImage || "",
                       backimage: checkoutResult.BackSideImage || "",
                       pdfLink: checkoutResult.PdfLink || "",
+                      glbLink: checkoutResult.GlbLink || "",
+                      previewUrl: previewUrl,
                       customText: checkoutResult.CustomText || "",
                     });
                     window.open(`${baseUrl}?${params.toString()}`, "_blank");
