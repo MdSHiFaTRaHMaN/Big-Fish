@@ -140,6 +140,9 @@ export const useCustomizerStore = create((set) => ({
         typeof patterns === "function" ? patterns(s.loadedPatterns) : patterns,
     })),
 
+  dynamicShapes: [],
+  setDynamicShapes: (shapes) => set({ dynamicShapes: shapes }),
+
   snapX: null,
   setSnapX: (x) => set({ snapX: x }),
   snapY: null,
